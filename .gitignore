@@ -1,0 +1,8 @@
+.DS_Store
+CloudOptimizer.app
+BoosteroidStatus.app
+BoosteroidPro.app
+*.iconset
+temp_icon.svg
+convert_svg.py
+generate_icon.py
