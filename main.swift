@@ -94,7 +94,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let rule = "%admin ALL=(ALL) NOPASSWD: \(pkillPath) -STOP rapportd, \(pkillPath) -CONT rapportd, \(ifconfigPath) awdl0 down, \(ifconfigPath) awdl0 up"
         
         if FileManager.default.fileExists(atPath: sudoersPath) {
-            if let content = try? String(contentsOfFile: sudoersPath), content.trimmingCharacters(in: .whitespacesAndNewlines) == rule {
+            if let content = try? String(contentsOfFile: sudoersPath, encoding: .utf8), content.trimmingCharacters(in: .whitespacesAndNewlines) == rule {
                 return true
             }
         }
