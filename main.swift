@@ -5,7 +5,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var timer: Timer?
     var inactivityTimer: Timer?
+    var uiUpdateTimer: Timer?
     
+    var statusMenuItem: NSMenuItem?
+    var countdownMenuItem: NSMenuItem?
+    var manualOverrideMenuItem: NSMenuItem?
     var rapportdMenuItem: NSMenuItem?
     var awdlMenuItem: NSMenuItem?
     
@@ -17,6 +21,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let ifconfigPath = "/sbin/ifconfig"
     
     var isGamingModeActive = false
+    var timerEndDate: Date?
+
+    // Settings
+    private let kInactivityTimeout = "inactivityTimeout"
+    private let kManualOverride = "manualOverride"
+
+    var inactivityTimeoutSeconds: Int {
+        get {
+            let val = UserDefaults.standard.integer(forKey: kInactivityTimeout)
+            return val == 0 ? 300 : (val == -1 ? 0 : val)
+        }
+        set {
+            UserDefaults.standard.set(newValue == 0 ? -1 : newValue, forKey: kInactivityTimeout)
+            setupMenu() // Refresh menu checkmarks
+        }
+    }
+    
+    var isManualOverride: Bool {
+        get { UserDefaults.standard.bool(forKey: kManualOverride) }
+        set { 
+            UserDefaults.standard.set(newValue, forKey: kManualOverride)
+            if newValue {
+                enableGamingMode()
+            } else {
+                checkIfTargetRunning() // Reset to focus-based state
+            }
+        }
+    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         if !hasSudoersSetup() {
@@ -24,19 +56,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        
-        let menu = NSMenu()
-        rapportdMenuItem = NSMenuItem(title: "rapportd: Checking...", action: nil, keyEquivalent: "")
-        awdlMenuItem = NSMenuItem(title: "awdl0: Checking...", action: nil, keyEquivalent: "")
-        
-        menu.addItem(rapportdMenuItem!)
-        menu.addItem(awdlMenuItem!)
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Refresh Now", action: #selector(checkStatus), keyEquivalent: "r"))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-        
-        statusItem?.menu = menu
+        setupMenu()
         
         // Monitoring
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appActivated), name: NSWorkspace.didActivateApplicationNotification, object: nil)
@@ -44,26 +64,122 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appTerminated), name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         
         // Initial check
-        checkIfTargetRunning()
+        if isManualOverride {
+            enableGamingMode()
+        } else {
+            checkIfTargetRunning()
+        }
         
         timer = Timer.scheduledTimer(timeInterval: 2.0, target: self, selector: #selector(checkStatus), userInfo: nil, repeats: true)
+        uiUpdateTimer = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(refreshUIStrings), userInfo: nil, repeats: true)
         checkStatus()
+    }
+
+    func setupMenu() {
+        let menu = NSMenu()
+        
+        statusMenuItem = NSMenuItem(title: "Status: Checking...", action: nil, keyEquivalent: "")
+        statusMenuItem?.isEnabled = false
+        menu.addItem(statusMenuItem!)
+        
+        countdownMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        countdownMenuItem?.isHidden = true
+        countdownMenuItem?.isEnabled = false
+        menu.addItem(countdownMenuItem!)
+        
+        menu.addItem(NSMenuItem.separator())
+        
+        manualOverrideMenuItem = NSMenuItem(title: "Force Optimization", action: #selector(toggleManualOverride), keyEquivalent: "f")
+        manualOverrideMenuItem?.state = isManualOverride ? .on : .off
+        menu.addItem(manualOverrideMenuItem!)
+        
+        let timeoutMenu = NSMenu()
+        let timeouts = [(60, "1 Minute"), (300, "5 Minutes"), (900, "15 Minutes"), (0, "Never (Always On)")]
+        for (sec, title) in timeouts {
+            let item = NSMenuItem(title: title, action: #selector(setTimeout(_:)), keyEquivalent: "")
+            item.representedObject = sec
+            item.state = (inactivityTimeoutSeconds == sec) ? .on : .off
+            timeoutMenu.addItem(item)
+        }
+        
+        let timeoutParent = NSMenuItem(title: "Disable inactivity after...", action: nil, keyEquivalent: "")
+        timeoutParent.submenu = timeoutMenu
+        menu.addItem(timeoutParent)
+        
+        menu.addItem(NSMenuItem.separator())
+        
+        rapportdMenuItem = NSMenuItem(title: "rapportd: Checking...", action: nil, keyEquivalent: "")
+        awdlMenuItem = NSMenuItem(title: "awdl0: Checking...", action: nil, keyEquivalent: "")
+        rapportdMenuItem?.isEnabled = false
+        awdlMenuItem?.isEnabled = false
+        
+        menu.addItem(rapportdMenuItem!)
+        menu.addItem(awdlMenuItem!)
+        
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Refresh Now", action: #selector(checkStatus), keyEquivalent: "r"))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        
+        statusItem?.menu = menu
+    }
+
+    @objc func toggleManualOverride() {
+        isManualOverride = !isManualOverride
+        setupMenu() // Refresh UI
+    }
+
+    @objc func setTimeout(_ sender: NSMenuItem) {
+        if let sec = sender.representedObject as? Int {
+            inactivityTimeoutSeconds = sec
+        }
+    }
+
+    @objc func refreshUIStrings() {
+        if let endDate = timerEndDate, isGamingModeActive, !isManualOverride {
+            let remaining = Int(max(0, endDate.timeIntervalSinceNow))
+            if remaining > 0 {
+                let mins = remaining / 60
+                let secs = remaining % 60
+                countdownMenuItem?.title = String(format: "Suspending in %02d:%02d...", mins, secs)
+                countdownMenuItem?.isHidden = false
+            } else {
+                countdownMenuItem?.isHidden = true
+            }
+        } else {
+            countdownMenuItem?.isHidden = true
+        }
+        
+        if isManualOverride {
+            statusMenuItem?.title = "Status: Optimized (Manual)"
+        } else if isGamingModeActive {
+            statusMenuItem?.title = "Status: Optimized (Focused)"
+        } else if let frontmost = NSWorkspace.shared.frontmostApplication, frontmost.localizedName == targetApp {
+            statusMenuItem?.title = "Status: Waiting (Focused)"
+        } else {
+            statusMenuItem?.title = "Status: Inactive"
+        }
     }
     
     @objc func appActivated(_ notification: Notification) {
         if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, app.localizedName == targetApp {
             inactivityTimer?.invalidate()
             inactivityTimer = nil
+            timerEndDate = nil
             enableGamingMode()
         }
     }
     
     @objc func appDeactivated(_ notification: Notification) {
         if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, app.localizedName == targetApp {
-            // Start 5-minute inactivity timer
+            if isManualOverride || inactivityTimeoutSeconds == 0 { return }
+            
+            // Start inactivity timer
             inactivityTimer?.invalidate()
-            inactivityTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: false) { [weak self] _ in
+            timerEndDate = Date().addingTimeInterval(TimeInterval(inactivityTimeoutSeconds))
+            inactivityTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(inactivityTimeoutSeconds), repeats: false) { [weak self] _ in
                 self?.disableGamingMode()
+                self?.timerEndDate = nil
             }
         }
     }
@@ -72,15 +188,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, app.localizedName == targetApp {
             inactivityTimer?.invalidate()
             inactivityTimer = nil
-            disableGamingMode()
+            timerEndDate = nil
+            if !isManualOverride {
+                disableGamingMode()
+            }
         }
     }
     
     func checkIfTargetRunning() {
+        if isManualOverride { return }
         if let frontmostApp = NSWorkspace.shared.frontmostApplication, frontmostApp.localizedName == targetApp {
             enableGamingMode()
+        } else {
+            disableGamingMode()
         }
     }
+
     
     func enableGamingMode() {
         guard !isGamingModeActive else { return }
