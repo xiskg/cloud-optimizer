@@ -1,6 +1,6 @@
 # Cloud Optimizer 🎮🚀
 
-**Cloud Optimizer** is a lightweight macOS utility designed to eliminate Wi-Fi latency spikes and stuttering while using cloud gaming services like **Boosteroid**, **GeForce NOW**, and **Xbox Cloud Gaming**.
+**Cloud Optimizer** is a lightweight macOS utility designed to eliminate Wi-Fi latency spikes and stuttering while using cloud gaming services like **Boosteroid**.
 
 ## The Problem: macOS Wi-Fi Spikes
 
@@ -12,33 +12,31 @@ Additionally, the `rapportd` daemon (responsible for Continuity features) freque
 
 ## The Solution
 
-**Cloud Optimizer** automatically monitors when you are gaming and takes surgical action:
+**Cloud Optimizer** provides a smart, automated way to manage these services based on your activity:
 
-1.  **Smart Monitoring**: It watches for the launch of your gaming app (hardcoded for Boosteroid, but extensible).
-2.  **Service Suspension**: It suspends `rapportd` (using the `STOP` signal) and brings the `awdl0` interface `down`.
-3.  **Automatic Enforcement**: It ensures these services stay disabled as long as you are gaming, as macOS often tries to re-enable them.
-4.  **Instant Recovery**: As soon as you close your game, it resumes `rapportd` and brings `awdl0` back `up`, restoring all macOS features immediately.
+1.  **Focus-Based Activation**: Optimization (suspending `rapportd` and bringing `awdl0` down) triggers instantly when your game (Boosteroid) is the frontmost application.
+2.  **Smart Inactivity Timer**: If you switch to another app (like a browser or Finder), the optimizer stays active for a grace period (configurable: 1, 5, or 15 mins) before restoring services.
+3.  **Real-Time Monitoring**: The app checks focus and system state every 2 seconds to ensure optimization is enforced and reconciled.
+4.  **Instant Recovery**: Services are restored immediately when the game is closed or after the inactivity timer expires.
 
 ## Features
 
+-   **Enhanced Menu Bar UI**: See real-time status (Active, Grace Period, Ready) and a countdown timer directly in the menu.
+-   **Manual Override**: Force optimization "on" regardless of game focus for other low-latency needs.
+-   **Configurable Grace Period**: Choose how long the optimizer stays active in the background.
+-   **Start at Login**: Optional setting to launch the app automatically on macOS 13+ (Ventura and newer).
+-   **Failsafe Recovery**: A "Restore Services Now" option to manually reset network settings if needed.
 -   **Zero-Config Onboarding**: A friendly window explains permissions and sets up the system for you.
--   **Passwordless Operation**: After a one-time setup, the app runs privileged commands silently without prompting for your password every time.
--   **Native Experience**: A lightweight Menu Bar app with real-time status icons.
--   **Privacy Focused**: No data collection, no external servers. Just a simple Swift tool.
+-   **Passwordless Operation**: After a one-time setup, the app runs privileged commands silently.
 
 ## Installation
 
-### Pre-built Version
-1.  Download the latest `CloudOptimizer.app` from the [Releases](https://github.com/YOUR_USERNAME/cloud-optimizer/releases) section.
-2.  Move it to your `/Applications` folder.
-3.  Open it, follow the onboarding instructions, and enter your password once to authorize the optimizer.
-
 ### Building from Source
-If you prefer to build it yourself, ensure you have Swift installed (included with Xcode):
+Ensure you have Swift installed (included with Xcode):
 
 1.  Clone this repository:
     ```bash
-    git clone https://github.com/YOUR_USERNAME/cloud-optimizer.git
+    git clone https://github.com/xiskg/cloud-optimizer.git
     cd cloud-optimizer
     ```
 2.  Run the build script:
