@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ServiceManagement
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
@@ -10,6 +11,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusMenuItem: NSMenuItem?
     var countdownMenuItem: NSMenuItem?
     var manualOverrideMenuItem: NSMenuItem?
+    var launchAtLoginMenuItem: NSMenuItem?
     var rapportdMenuItem: NSMenuItem?
     var awdlMenuItem: NSMenuItem?
     
@@ -46,6 +48,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 enableGamingMode()
             } else {
                 checkIfTargetRunning() // Reset to focus-based state
+            }
+        }
+    }
+
+    var isLaunchAtLoginEnabled: Bool {
+        get {
+            return SMAppService.mainApp.status == .enabled
+        }
+        set {
+            do {
+                if newValue {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                print("Failed to update Launch at Login: \(error)")
             }
         }
     }
@@ -92,6 +111,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         manualOverrideMenuItem = NSMenuItem(title: "Force Optimization", action: #selector(toggleManualOverride), keyEquivalent: "f")
         manualOverrideMenuItem?.state = isManualOverride ? .on : .off
         menu.addItem(manualOverrideMenuItem!)
+
+        launchAtLoginMenuItem = NSMenuItem(title: "Start at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        launchAtLoginMenuItem?.state = isLaunchAtLoginEnabled ? .on : .off
+        menu.addItem(launchAtLoginMenuItem!)
         
         let timeoutMenu = NSMenu()
         let timeouts = [(60, "1 Minute"), (300, "5 Minutes"), (900, "15 Minutes"), (0, "Never (Always On)")]
@@ -127,6 +150,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func toggleManualOverride() {
         isManualOverride = !isManualOverride
         setupMenu() // Refresh UI
+    }
+
+    @objc func toggleLaunchAtLogin() {
+        isLaunchAtLoginEnabled = !isLaunchAtLoginEnabled
+        setupMenu()
     }
 
     @objc func setTimeout(_ sender: NSMenuItem) {
