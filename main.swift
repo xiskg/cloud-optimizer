@@ -4,6 +4,7 @@ import Foundation
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var timer: Timer?
+    var inactivityTimer: Timer?
     
     var rapportdMenuItem: NSMenuItem?
     var awdlMenuItem: NSMenuItem?
@@ -38,7 +39,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.menu = menu
         
         // Monitoring
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appLaunched), name: NSWorkspace.didLaunchApplicationNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appActivated), name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appDeactivated), name: NSWorkspace.didDeactivateApplicationNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appTerminated), name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         
         // Initial check
@@ -48,21 +50,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         checkStatus()
     }
     
-    @objc func appLaunched(_ notification: Notification) {
+    @objc func appActivated(_ notification: Notification) {
         if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, app.localizedName == targetApp {
+            inactivityTimer?.invalidate()
+            inactivityTimer = nil
             enableGamingMode()
+        }
+    }
+    
+    @objc func appDeactivated(_ notification: Notification) {
+        if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, app.localizedName == targetApp {
+            // Start 5-minute inactivity timer
+            inactivityTimer?.invalidate()
+            inactivityTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: false) { [weak self] _ in
+                self?.disableGamingMode()
+            }
         }
     }
     
     @objc func appTerminated(_ notification: Notification) {
         if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, app.localizedName == targetApp {
+            inactivityTimer?.invalidate()
+            inactivityTimer = nil
             disableGamingMode()
         }
     }
     
     func checkIfTargetRunning() {
-        let runningApps = NSWorkspace.shared.runningApplications
-        if runningApps.contains(where: { $0.localizedName == targetApp }) {
+        if let frontmostApp = NSWorkspace.shared.frontmostApplication, frontmostApp.localizedName == targetApp {
             enableGamingMode()
         }
     }
