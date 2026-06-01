@@ -140,11 +140,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(awdlMenuItem!)
         
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Restore Services Now", action: #selector(forceRestore), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Refresh Now", action: #selector(checkStatus), keyEquivalent: "r"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         
         statusItem?.menu = menu
+    }
+
+    @objc func forceRestore() {
+        isManualOverride = false
+        isGamingModeActive = true // Force true so disableGamingMode runs
+        disableGamingMode()
+        inactivityTimer?.invalidate()
+        inactivityTimer = nil
+        timerEndDate = nil
+        setupMenu()
     }
 
     @objc func toggleManualOverride() {
@@ -169,7 +180,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if remaining > 0 {
                 let mins = remaining / 60
                 let secs = remaining % 60
-                countdownMenuItem?.title = String(format: "Suspending in %02d:%02d...", mins, secs)
+                countdownMenuItem?.title = String(format: "Restoring in %02d:%02d...", mins, secs)
                 countdownMenuItem?.isHidden = false
             } else {
                 countdownMenuItem?.isHidden = true
@@ -181,12 +192,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if isManualOverride {
             statusMenuItem?.title = "Status: Optimized (Manual)"
         } else if isGamingModeActive {
-            statusMenuItem?.title = "Status: Optimized (Active)"
+            if let frontmost = NSWorkspace.shared.frontmostApplication, frontmost.localizedName == targetApp {
+                statusMenuItem?.title = "Status: Optimized (Active)"
+            } else {
+                statusMenuItem?.title = "Status: Grace Period (Timer)"
+            }
         } else {
             let runningApps = NSWorkspace.shared.runningApplications
             let isRunning = runningApps.contains(where: { $0.localizedName == targetApp })
             if isRunning {
-                statusMenuItem?.title = "Status: Waiting (Background)"
+                statusMenuItem?.title = "Status: Ready (Waiting Focus)"
             } else {
                 statusMenuItem?.title = "Status: Inactive (App Closed)"
             }
@@ -313,48 +328,77 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc func checkStatus() {
-        // 1. Logic for activation/inactivity
         let frontmostApp = NSWorkspace.shared.frontmostApplication
         let isTargetFrontmost = frontmostApp?.localizedName == targetApp
         
-        if isTargetFrontmost {
-            // Boosteroid is focused: Ensure active, kill timer
-            inactivityTimer?.invalidate()
-            inactivityTimer = nil
-            timerEndDate = nil
-            enableGamingMode()
-        } else if isGamingModeActive && !isManualOverride {
-            // Boosteroid is NOT focused but mode is active
-            if inactivityTimeoutSeconds > 0 {
-                if inactivityTimer == nil {
-                    // Start the timer
-                    let timeout = TimeInterval(inactivityTimeoutSeconds)
-                    timerEndDate = Date().addingTimeInterval(timeout)
-                    let t = Timer(timeInterval: timeout, repeats: false) { [weak self] _ in
-                        self?.disableGamingMode()
-                        self?.timerEndDate = nil
-                        self?.inactivityTimer = nil
-                    }
-                    inactivityTimer = t
-                    RunLoop.main.add(t, forMode: .common)
-                }
-            }
-        }
-        
-        // 2. Physical status check
-        if isGamingModeActive {
-            _ = shell("sudo \(ifconfigPath) awdl0 down")
-        }
-        
-        let fileExists = FileManager.default.fileExists(atPath: "/tmp/gamemode_on")
+        let runningApps = NSWorkspace.shared.runningApplications
+        let isTargetRunning = runningApps.contains(where: { $0.localizedName == targetApp })
+
+        // Physical status check
         let rapportdStatus = shell("ps -ax -o state,comm | grep rapportd | grep -v grep").trimmingCharacters(in: .whitespacesAndNewlines)
         let isRapportdSuspended = rapportdStatus.contains("T")
         let ifconfigOutput = shell("ifconfig awdl0").lowercased()
         let isAwdlDown = !ifconfigOutput.contains("status: active") || ifconfigOutput.contains("inactive")
+        let isPhysicallyOptimized = isRapportdSuspended && isAwdlDown
+
+        // 1. RECONCILIATION LOGIC
+        if isManualOverride {
+            enableGamingMode()
+        } else if isTargetFrontmost {
+            // Boosteroid is focused: Active mode, no timer
+            inactivityTimer?.invalidate()
+            inactivityTimer = nil
+            timerEndDate = nil
+            enableGamingMode()
+        } else if isTargetRunning {
+            // Boosteroid running in background
+            if isGamingModeActive {
+                // We are already in gaming mode (grace period)
+                if inactivityTimeoutSeconds > 0 {
+                    if inactivityTimer == nil {
+                        startInactivityTimer()
+                    }
+                }
+            } else if isPhysicallyOptimized {
+                // DESYNC: System is optimized but app thinks it's not. 
+                // Since Boosteroid is running, we "take over" and start the grace period.
+                isGamingModeActive = true
+                startInactivityTimer()
+            }
+        } else {
+            // Boosteroid not running at all
+            if isGamingModeActive || isPhysicallyOptimized {
+                disableGamingMode()
+            }
+            inactivityTimer?.invalidate()
+            inactivityTimer = nil
+            timerEndDate = nil
+        }
+        
+        // 2. ENFORCE PHYSICAL STATE
+        if isGamingModeActive {
+            _ = shell("sudo \(ifconfigPath) awdl0 down")
+            // (pkill -STOP is handled by enableGamingMode to avoid repeating sudo unnecessarily)
+        }
+        
+        let fileExists = FileManager.default.fileExists(atPath: "/tmp/gamemode_on")
         
         DispatchQueue.main.async {
             self.updateUI(file: fileExists, rapportdSuspended: isRapportdSuspended, awdlDown: isAwdlDown)
         }
+    }
+
+    func startInactivityTimer() {
+        inactivityTimer?.invalidate()
+        let timeout = TimeInterval(inactivityTimeoutSeconds)
+        timerEndDate = Date().addingTimeInterval(timeout)
+        let t = Timer(timeInterval: timeout, repeats: false) { [weak self] _ in
+            self?.disableGamingMode()
+            self?.timerEndDate = nil
+            self?.inactivityTimer = nil
+        }
+        inactivityTimer = t
+        RunLoop.main.add(t, forMode: .common)
     }
     
     func updateUI(file: Bool, rapportdSuspended: Bool, awdlDown: Bool) {
