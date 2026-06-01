@@ -153,35 +153,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if isManualOverride {
             statusMenuItem?.title = "Status: Optimized (Manual)"
         } else if isGamingModeActive {
-            statusMenuItem?.title = "Status: Optimized (Focused)"
-        } else if let frontmost = NSWorkspace.shared.frontmostApplication, frontmost.localizedName == targetApp {
-            statusMenuItem?.title = "Status: Waiting (Focused)"
+            statusMenuItem?.title = "Status: Optimized (Active)"
         } else {
-            statusMenuItem?.title = "Status: Inactive"
+            let runningApps = NSWorkspace.shared.runningApplications
+            let isRunning = runningApps.contains(where: { $0.localizedName == targetApp })
+            if isRunning {
+                statusMenuItem?.title = "Status: Waiting (Background)"
+            } else {
+                statusMenuItem?.title = "Status: Inactive (App Closed)"
+            }
         }
     }
     
     @objc func appActivated(_ notification: Notification) {
-        if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, app.localizedName == targetApp {
-            inactivityTimer?.invalidate()
-            inactivityTimer = nil
-            timerEndDate = nil
-            enableGamingMode()
-        }
+        // Handled by checkStatus timer
     }
     
     @objc func appDeactivated(_ notification: Notification) {
-        if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, app.localizedName == targetApp {
-            if isManualOverride || inactivityTimeoutSeconds == 0 { return }
-            
-            // Start inactivity timer
-            inactivityTimer?.invalidate()
-            timerEndDate = Date().addingTimeInterval(TimeInterval(inactivityTimeoutSeconds))
-            inactivityTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(inactivityTimeoutSeconds), repeats: false) { [weak self] _ in
-                self?.disableGamingMode()
-                self?.timerEndDate = nil
-            }
-        }
+        // Handled by checkStatus timer
     }
     
     @objc func appTerminated(_ notification: Notification) {
@@ -199,8 +188,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if isManualOverride { return }
         if let frontmostApp = NSWorkspace.shared.frontmostApplication, frontmostApp.localizedName == targetApp {
             enableGamingMode()
-        } else {
-            disableGamingMode()
         }
     }
 
@@ -298,6 +285,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc func checkStatus() {
+        // 1. Logic for activation/inactivity
+        let frontmostApp = NSWorkspace.shared.frontmostApplication
+        let isTargetFrontmost = frontmostApp?.localizedName == targetApp
+        
+        if isTargetFrontmost {
+            // Boosteroid is focused: Ensure active, kill timer
+            inactivityTimer?.invalidate()
+            inactivityTimer = nil
+            timerEndDate = nil
+            enableGamingMode()
+        } else if isGamingModeActive && !isManualOverride {
+            // Boosteroid is NOT focused but mode is active
+            if inactivityTimeoutSeconds > 0 {
+                if inactivityTimer == nil {
+                    // Start the timer
+                    let timeout = TimeInterval(inactivityTimeoutSeconds)
+                    timerEndDate = Date().addingTimeInterval(timeout)
+                    let t = Timer(timeInterval: timeout, repeats: false) { [weak self] _ in
+                        self?.disableGamingMode()
+                        self?.timerEndDate = nil
+                        self?.inactivityTimer = nil
+                    }
+                    inactivityTimer = t
+                    RunLoop.main.add(t, forMode: .common)
+                }
+            }
+        }
+        
+        // 2. Physical status check
         if isGamingModeActive {
             _ = shell("sudo \(ifconfigPath) awdl0 down")
         }
