@@ -16,7 +16,7 @@ mkdir -p "$MACOS_DIR"
 mkdir -p "$RESOURCES_DIR"
 
 # Compile Swift code
-swiftc -o "${MACOS_DIR}/${APP_NAME}" main.swift -framework AppKit
+swiftc -parse-as-library -o "${MACOS_DIR}/${APP_NAME}" App.swift -framework AppKit -framework SwiftUI -framework ServiceManagement
 
 # Copy icon if it exists
 if [ -f "AppIcon.icns" ]; then
@@ -43,7 +43,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundleShortVersionString</key>
     <string>1.2</string>
     <key>LSMinimumSystemVersion</key>
-    <string>12.0</string>
+    <string>13.0</string>
     <key>LSUIElement</key>
     <true/>
     ${ICON_LINE}
