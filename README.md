@@ -14,7 +14,8 @@ Additionally, the `rapportd` daemon (responsible for Continuity features) freque
 
 **Cloud Optimizer** provides a smart, automated way to manage these services based on your activity:
 
-1.  **Focus-Based Activation**: Optimization (suspending `rapportd` and bringing `awdl0` down) triggers instantly when your game (Boosteroid) is the frontmost application.
+1.  **Focus-Based Activation**: Optimization (suspending `rapportd` and bringing `awdl0` down) triggers instantly when the **Boosteroid native app** is the frontmost application. 
+    > ⚠️ **Note:** Automatic detection only works for the native app. If you play in a **browser**, you must use the **Force Optimization** mode manually.
 2.  **Custom SwiftUI Popover**: A beautiful, interactive menu bar interface for real-time monitoring and control.
 3.  **Smart Inactivity Timer**: If you switch to another app, the optimizer stays active for a grace period (configurable) before restoring services.
 4.  **Real-Time Monitoring**: The app checks focus and system state every 2 seconds to ensure optimization is enforced.
