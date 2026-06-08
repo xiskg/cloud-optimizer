@@ -31,7 +31,21 @@ Additionally, the `rapportd` daemon (responsible for Continuity features) freque
 
 ## Installation
 
-### Building from Source
+### Option 1: Homebrew (Recommended)
+The easiest way to install and keep Cloud Optimizer updated:
+
+```bash
+brew tap xiskg/tap
+brew install --cask cloud-optimizer --no-quarantine
+```
+*The `--no-quarantine` flag is recommended to avoid macOS blocking the app since it's not signed with an Apple Developer certificate.*
+
+### Option 2: Pre-built Binary
+1. Download the latest `CloudOptimizer_v1.1.0.zip` from the [Releases](https://github.com/xiskg/cloud-optimizer/releases) page.
+2. Extract and move `CloudOptimizer.app` to your `/Applications` folder.
+3. Open it and follow the one-time onboarding.
+
+### Option 3: Building from Source
 Ensure you have Swift installed (included with Xcode):
 
 1.  Clone this repository:
@@ -44,6 +58,19 @@ Ensure you have Swift installed (included with Xcode):
     ./build.sh
     ```
 3.  The `CloudOptimizer.app` bundle will be created in the root directory.
+
+## 🛠 Troubleshooting
+
+### "App is damaged" or "Cannot be opened"
+Because this app is not signed with an official Apple Developer certificate ($99/year), macOS Gatekeeper might flag it as "damaged" or "corrupted" when downloaded manually.
+
+To fix this, open your Terminal and run:
+```bash
+xattr -d com.apple.quarantine /Applications/CloudOptimizer.app
+```
+
+### Why does it need sudo?
+The app uses `pkill -STOP` and `ifconfig awdl0 down`. These are system-level commands that require root privileges. The onboarding process creates a surgical sudoers rule at `/etc/sudoers.d/cloud_optimizer` so the app can run these *specific* commands without asking for your password every time.
 
 ## Technical Details
 
