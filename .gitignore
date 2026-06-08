@@ -6,3 +6,5 @@ BoosteroidPro.app
 temp_icon.svg
 convert_svg.py
 generate_icon.py
+*.zip
+homebrew-tap/
