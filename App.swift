@@ -47,12 +47,10 @@ class OptimizerManager: ObservableObject {
     private var inactivityTimer: Timer?
     
     init() {
-        // Load settings
         self.isManualOverride = UserDefaults.standard.bool(forKey: kManualOverride)
         let timeoutVal = UserDefaults.standard.integer(forKey: kInactivityTimeout)
         self.inactivityTimeoutSeconds = timeoutVal == 0 ? 300 : (timeoutVal == -1 ? 0 : timeoutVal)
         
-        // Initial state
         let needsOnboarding = !hasSudoersSetup()
         self.showOnboarding = needsOnboarding
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -94,14 +92,11 @@ class OptimizerManager: ObservableObject {
     @objc func checkStatus() {
         let frontmostApp = NSWorkspace.shared.frontmostApplication
         let isTargetFrontmost = frontmostApp?.localizedName == targetApp
-        
         let runningApps = NSWorkspace.shared.runningApplications
         let isTargetRunning = runningApps.contains(where: { $0.localizedName == targetApp })
 
-        // Physical status check
         let rapportdStatus = shell("ps -axc -o state,command | grep rapportd | grep -v grep").trimmingCharacters(in: .whitespacesAndNewlines)
         let isRapportdSuspendedNow = rapportdStatus.contains("T")
-        
         let ifconfigOutput = shell("ifconfig awdl0").lowercased()
         let isAwdlDownNow = !ifconfigOutput.contains("status: active") || ifconfigOutput.contains("inactive")
         
@@ -112,7 +107,6 @@ class OptimizerManager: ObservableObject {
 
         let isPhysicallyOptimized = isRapportdSuspendedNow && isAwdlDownNow
 
-        // 1. RECONCILIATION LOGIC
         if isManualOverride {
             enableGamingMode()
         } else if isTargetFrontmost {
@@ -138,7 +132,6 @@ class OptimizerManager: ObservableObject {
             timerEndDate = nil
         }
         
-        // 2. ENFORCE PHYSICAL STATE
         if isGamingModeActive {
             if !isAwdlDownNow { _ = shell("sudo \(ifconfigPath) awdl0 down") }
             if !isRapportdSuspendedNow { _ = shell("sudo \(pkillPath) -STOP rapportd") }
@@ -151,7 +144,7 @@ class OptimizerManager: ObservableObject {
             if remaining > 0 {
                 let mins = remaining / 60
                 let secs = remaining % 60
-                countdownTitle = String(format: "Restoring in %02d:%02d...", mins, secs)
+                countdownTitle = String(format: "%02d:%02d", mins, secs)
             } else {
                 countdownTitle = nil
             }
@@ -165,12 +158,12 @@ class OptimizerManager: ObservableObject {
             if let frontmost = NSWorkspace.shared.frontmostApplication, frontmost.localizedName == targetApp {
                 statusTitle = "Optimized (Active)"
             } else {
-                statusTitle = "Grace Period (Timer)"
+                statusTitle = "Grace Period"
             }
         } else {
             let runningApps = NSWorkspace.shared.runningApplications
             let isRunning = runningApps.contains(where: { $0.localizedName == targetApp })
-            statusTitle = isRunning ? "Ready (Waiting Focus)" : "Inactive (App Closed)"
+            statusTitle = isRunning ? "Ready" : "Inactive"
         }
     }
 
@@ -235,7 +228,6 @@ class OptimizerManager: ObservableObject {
         
         if error == nil {
             self.showOnboarding = false
-            // Close the onboarding window if it's open
             NSApp.windows.first(where: { $0.title == "Cloud Optimizer Setup" })?.close()
             self.checkStatus()
         }
@@ -253,7 +245,7 @@ class OptimizerManager: ObservableObject {
     func showOnboardingWindow() {
         DispatchQueue.main.async {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 450, height: 300),
+                contentRect: NSRect(x: 0, y: 0, width: 450, height: 350),
                 styleMask: [.titled, .closable],
                 backing: .buffered, defer: false)
             window.center()
@@ -278,93 +270,242 @@ class OptimizerManager: ObservableObject {
     }
 }
 
-// MARK: - SwiftUI Views
+// MARK: - Components
+struct StatusCard: View {
+    let title: String
+    let icon: String
+    let isActive: Bool
+    let activeText: String
+    let inactiveText: String
+    
+    var body: some View {
+        HStack {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(isActive ? .white : .secondary)
+                .frame(width: 28, height: 28)
+                .background(isActive ? Color.orange.opacity(0.8) : Color.gray.opacity(0.1))
+                .cornerRadius(6)
+            
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text(isActive ? activeText : inactiveText)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(isActive ? .primary : .secondary)
+            }
+            Spacer()
+            Circle()
+                .fill(isActive ? Color.green : Color.red)
+                .frame(width: 8, height: 8)
+                .shadow(color: (isActive ? Color.green : Color.red).opacity(0.5), radius: 2)
+        }
+        .padding(8)
+        .background(Color(NSColor.windowBackgroundColor).opacity(0.5))
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+    }
+}
+
+struct CustomToggle: View {
+    let title: String
+    let icon: String
+    @Binding var isOn: Bool
+    
+    var body: some View {
+        Button(action: { isOn.toggle() }) {
+            HStack {
+                Image(systemName: icon)
+                    .frame(width: 20)
+                Text(title)
+                    .font(.system(size: 13))
+                Spacer()
+                Toggle("", isOn: $isOn).labelsHidden()
+                    .scaleEffect(0.8)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(isOn ? Color.accentColor.opacity(0.1) : Color.clear)
+            .cornerRadius(8)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Main Popover View
+struct CustomPopoverView: View {
+    @ObservedObject var manager: OptimizerManager
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(manager.statusTitle)
+                        .font(.system(size: 16, weight: .bold))
+                    if let countdown = manager.countdownTitle {
+                        Text("Restoring in \(countdown)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.orange)
+                    } else {
+                        Text("Monitoring Boosteroid")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Spacer()
+                Image(systemName: manager.isGamingModeActive || manager.isManualOverride ? "bolt.shield.fill" : "bolt.shield")
+                    .font(.system(size: 24))
+                    .foregroundColor(manager.isGamingModeActive || manager.isManualOverride ? .orange : .secondary.opacity(0.5))
+            }
+            .padding(.horizontal, 4)
+            
+            // Status Grid
+            VStack(spacing: 8) {
+                StatusCard(title: "Continuity Service", icon: "app.connected.to.app.below.fill", isActive: manager.rapportdSuspended, activeText: "Suspended", inactiveText: "Running")
+                StatusCard(title: "Wireless Link", icon: "wifi.circle.fill", isActive: manager.awdlDown, activeText: "Optimized", inactiveText: "Active")
+            }
+            
+            Divider().opacity(0.5)
+            
+            // Controls
+            VStack(spacing: 4) {
+                CustomToggle(title: "Force Optimization", icon: "hand.tap.fill", isOn: $manager.isManualOverride)
+                CustomToggle(title: "Start at Login", icon: "power", isOn: $manager.launchAtLogin)
+                
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Image(systemName: "timer")
+                            .frame(width: 20)
+                        Text("Grace Period")
+                            .font(.system(size: 13))
+                        Spacer()
+                    }
+                    Picker("", selection: $manager.inactivityTimeoutSeconds) {
+                        Text("1m").tag(60)
+                        Text("5m").tag(300)
+                        Text("15m").tag(900)
+                        Text("∞").tag(0)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.primary.opacity(0.03))
+                .cornerRadius(8)
+            }
+            
+            Divider().opacity(0.5)
+            
+            // Footer Actions
+            HStack(spacing: 12) {
+                Button(action: { manager.forceRestore() }) {
+                    Label("Restore", systemImage: "arrow.counterclockwise")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 10)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(6)
+                }.buttonStyle(.plain)
+                
+                Button(action: { manager.checkStatus() }) {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 10)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(6)
+                }.buttonStyle(.plain)
+                
+                Spacer()
+                
+                Button(action: { NSApplication.shared.terminate(nil) }) {
+                    Image(systemName: "power")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.red.opacity(0.8))
+                        .padding(6)
+                        .background(Color.red.opacity(0.1))
+                        .clipShape(Circle())
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .frame(width: 280)
+        .background(VisualEffectView(material: .menu, blendingMode: .behindWindow))
+    }
+}
+
+// MARK: - Helper Views
+struct VisualEffectView: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    let blendingMode: NSVisualEffectView.BlendingMode
+    
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        return view
+    }
+    
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+    }
+}
+
 struct OnboardingView: View {
     @ObservedObject var manager: OptimizerManager
     
     var body: some View {
-        VStack(spacing: 20) {
-            Text("Welcome to Cloud Optimizer")
-                .font(.headline)
+        VStack(spacing: 24) {
+            Image(systemName: "bolt.shield.fill")
+                .font(.system(size: 50))
+                .foregroundColor(.orange)
+                .padding(.top, 10)
             
-            Text("To ensure the best gaming experience, this app reduces Wi-Fi latency spikes by temporarily suspending background services (like AirPlay/AirDrop and Continuity) while Boosteroid is running.\n\nClick below to enable the optimizer. You will need to enter your Mac password once to authorize these system changes.")
+            Text("Ready to Optimize?")
+                .font(.title2).bold()
+            
+            Text("To eliminate ping spikes, I need permission to temporarily pause AirDrop and Continuity services while you game.")
                 .font(.body)
                 .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
                 .padding(.horizontal)
             
-            Button("Enable Optimizer") {
-                manager.performSudoersSetup()
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-        }
-        .padding(30)
-        .frame(width: 450, height: 300)
-    }
-}
-
-struct MenuView: View {
-    @ObservedObject var manager: OptimizerManager
-    
-    var body: some View {
-        Group {
-            Text("Status: \(manager.statusTitle)")
-                .disabled(true)
-            
-            if let countdown = manager.countdownTitle {
-                Text(countdown)
-                    .disabled(true)
-            }
-            
-            Divider()
-            
-            Button(manager.isManualOverride ? "Stop Manual Optimization" : "Force Optimization") {
-                manager.isManualOverride.toggle()
-            }
-            .keyboardShortcut("f")
-            
-            Toggle("Start at Login", isOn: $manager.launchAtLogin)
-            
-            Menu("Disable inactivity after...") {
-                let options = [(60, "1 Minute"), (300, "5 Minutes"), (900, "15 Minutes"), (0, "Never (Always On)")]
-                ForEach(options, id: \.0) { sec, title in
-                    Button(title) {
-                        manager.inactivityTimeoutSeconds = sec
-                    }
-                    .tag(sec)
-                    if manager.inactivityTimeoutSeconds == sec {
-                        // SwiftUI Menu handles checkmarks automatically if using Pickers, 
-                        // but for simple Buttons we can't easily show the dot without custom views.
-                        // However, MenuBarExtra menus behave like standard menus.
-                    }
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                    Text("No password prompts while gaming")
+                }
+                HStack {
+                    Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                    Text("Automatic service restoration")
                 }
             }
+            .font(.subheadline)
             
-            Divider()
+            Spacer()
             
-            Text("rapportd: \(manager.rapportdSuspended ? "🔴 Suspended" : "🟢 Running")")
-                .disabled(true)
-            Text("awdl0: \(manager.awdlDown ? "🔴 Down" : "🟢 Up")")
-                .disabled(true)
-            
-            Divider()
-            
-            Button("Restore Services Now") {
-                manager.forceRestore()
+            Button(action: { manager.performSudoersSetup() }) {
+                Text("Authorize & Start")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.accentColor)
+                    .cornerRadius(12)
             }
-            
-            Button("Refresh Now") {
-                manager.checkStatus()
-            }
-            .keyboardShortcut("r")
-            
-            Divider()
-            
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
-            .keyboardShortcut("q")
+            .buttonStyle(.plain)
+            .padding(.bottom, 10)
         }
+        .padding(30)
+        .frame(width: 450, height: 400)
+        .background(VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow))
     }
 }
 
@@ -375,14 +516,16 @@ struct CloudOptimizerApp: App {
     
     var body: some Scene {
         MenuBarExtra {
-            MenuView(manager: manager)
+            CustomPopoverView(manager: manager)
         } label: {
             let isActuallyActive = manager.isGamingModeActive || manager.isManualOverride || (manager.rapportdSuspended && manager.awdlDown)
-            if isActuallyActive {
-                Image(systemName: "gamecontroller.fill")
-            } else {
-                Image(systemName: "desktopcomputer")
+            HStack(spacing: 2) {
+                Image(systemName: isActuallyActive ? "bolt.shield.fill" : "bolt.shield")
+                if let countdown = manager.countdownTitle {
+                    Text(countdown).font(.system(size: 10, weight: .bold))
+                }
             }
         }
+        .menuBarExtraStyle(.window) // The MAGIC part for custom UI
     }
 }
