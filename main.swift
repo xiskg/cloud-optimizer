@@ -239,8 +239,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard !isGamingModeActive else { return }
         isGamingModeActive = true
         
-        // Give the PWA a moment to load as in the original script
-        DispatchQueue.global().asyncAfter(deadline: .now() + 10) {
+        // Optimization is now enforced immediately
+        DispatchQueue.global().async {
             if self.isGamingModeActive {
                 _ = self.shell("sudo \(self.pkillPath) -STOP rapportd")
                 _ = self.shell("sudo \(self.ifconfigPath) awdl0 down")
@@ -253,9 +253,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard isGamingModeActive else { return }
         isGamingModeActive = false
         
-        _ = self.shell("sudo \(self.pkillPath) -CONT rapportd")
-        _ = self.shell("sudo \(self.ifconfigPath) awdl0 up")
-        _ = self.shell("rm -f /tmp/gamemode_on")
+        DispatchQueue.global().async {
+            _ = self.shell("sudo \(self.pkillPath) -CONT rapportd")
+            _ = self.shell("sudo \(self.ifconfigPath) awdl0 up")
+            _ = self.shell("rm -f /tmp/gamemode_on")
+        }
     }
     
     func hasSudoersSetup() -> Bool {
@@ -335,7 +337,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let isTargetRunning = runningApps.contains(where: { $0.localizedName == targetApp })
 
         // Physical status check
-        let rapportdStatus = shell("ps -ax -o state,comm | grep rapportd | grep -v grep").trimmingCharacters(in: .whitespacesAndNewlines)
+        // We use 'ps -axc' to get the short command name, avoiding matching the app path if it contains 'rapportd'
+        let rapportdStatus = shell("ps -axc -o state,command | grep rapportd | grep -v grep").trimmingCharacters(in: .whitespacesAndNewlines)
         let isRapportdSuspended = rapportdStatus.contains("T")
         let ifconfigOutput = shell("ifconfig awdl0").lowercased()
         let isAwdlDown = !ifconfigOutput.contains("status: active") || ifconfigOutput.contains("inactive")
@@ -377,8 +380,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // 2. ENFORCE PHYSICAL STATE
         if isGamingModeActive {
-            _ = shell("sudo \(ifconfigPath) awdl0 down")
-            // (pkill -STOP is handled by enableGamingMode to avoid repeating sudo unnecessarily)
+            if !isAwdlDown {
+                _ = shell("sudo \(ifconfigPath) awdl0 down")
+            }
+            if !isRapportdSuspended {
+                _ = shell("sudo \(pkillPath) -STOP rapportd")
+            }
         }
         
         let fileExists = FileManager.default.fileExists(atPath: "/tmp/gamemode_on")
